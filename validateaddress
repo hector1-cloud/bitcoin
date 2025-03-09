@@ -1,0 +1,12 @@
+validateaddress "address"
+}
+    "isvalid": true,
+    "address": "bc1q49haw4kxjlf9v857a0qcta4gy0sxadew7cg43p",
+    "scriptPubKey": "0014a96fd756c697d2561e9eebc185f6a823e06eb72e",
+    "isscript": false,
+    "iswitness": true,
+    "witness_version": 0,
+    "witness_program": "a96fd756c697d2561e9eebc185f6a823e06eb72e"
+}
+> bitcoin-cli validateaddress "bc1q09vm5lfy0j5reeulh4x5752q25uqqvz34hufdl"
+> curl --user myusername --data-binary '{"jsonrpc": "2.0", "id": "curltest", "method": "validateaddress", "params": ["bc1q09vm5lfy0j5reeulh4x5752q25uqqvz34hufdl"]}' -H 'content-type: application/json' http://127.0.0.1:8332/
