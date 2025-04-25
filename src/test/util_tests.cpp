@@ -13,6 +13,7 @@
 #include <test/util/setup_common.h>
 #include <uint256.h>
 #include <util/bitdeque.h>
+#include <util/byte_units.h>
 #include <util/fs.h>
 #include <util/fs_helpers.h>
 #include <util/moneystr.h>
@@ -159,8 +160,8 @@ BOOST_AUTO_TEST_CASE(parse_hex)
     BOOST_CHECK_EQUAL_COLLECTIONS(hex_literal_span.begin(), hex_literal_span.end(), expected.begin(), expected.end());
 
     const std::vector<std::byte> hex_literal_vector{operator""_hex_v<util::detail::Hex(HEX_PARSE_INPUT)>()};
-    hex_literal_span = MakeUCharSpan(hex_literal_vector);
-    BOOST_CHECK_EQUAL_COLLECTIONS(hex_literal_span.begin(), hex_literal_span.end(), expected.begin(), expected.end());
+    auto hex_literal_vec_span = MakeUCharSpan(hex_literal_vector);
+    BOOST_CHECK_EQUAL_COLLECTIONS(hex_literal_vec_span.begin(), hex_literal_vec_span.end(), expected.begin(), expected.end());
 
     constexpr std::array<uint8_t, 65> hex_literal_array_uint8{operator""_hex_u8<util::detail::Hex(HEX_PARSE_INPUT)>()};
     BOOST_CHECK_EQUAL_COLLECTIONS(hex_literal_array_uint8.begin(), hex_literal_array_uint8.end(), expected.begin(), expected.end());
@@ -235,14 +236,14 @@ BOOST_AUTO_TEST_CASE(consteval_hex_digit)
 BOOST_AUTO_TEST_CASE(util_HexStr)
 {
     BOOST_CHECK_EQUAL(HexStr(HEX_PARSE_OUTPUT), HEX_PARSE_INPUT);
-    BOOST_CHECK_EQUAL(HexStr(Span{HEX_PARSE_OUTPUT}.last(0)), "");
-    BOOST_CHECK_EQUAL(HexStr(Span{HEX_PARSE_OUTPUT}.first(0)), "");
+    BOOST_CHECK_EQUAL(HexStr(std::span{HEX_PARSE_OUTPUT}.last(0)), "");
+    BOOST_CHECK_EQUAL(HexStr(std::span{HEX_PARSE_OUTPUT}.first(0)), "");
 
     {
         constexpr std::string_view out_exp{"04678afdb0"};
         constexpr std::span in_s{HEX_PARSE_OUTPUT, out_exp.size() / 2};
-        const Span<const uint8_t> in_u{MakeUCharSpan(in_s)};
-        const Span<const std::byte> in_b{MakeByteSpan(in_s)};
+        const std::span<const uint8_t> in_u{MakeUCharSpan(in_s)};
+        const std::span<const std::byte> in_b{MakeByteSpan(in_s)};
 
         BOOST_CHECK_EQUAL(HexStr(in_u), out_exp);
         BOOST_CHECK_EQUAL(HexStr(in_s), out_exp);
@@ -566,14 +567,6 @@ BOOST_AUTO_TEST_CASE(strprintf_numbers)
 #undef B
 #undef E
 
-/* Check for mingw/wine issue #3494
- * Remove this test before time.ctime(0xffffffff) == 'Sun Feb  7 07:28:15 2106'
- */
-BOOST_AUTO_TEST_CASE(gettime)
-{
-    BOOST_CHECK((GetTime() & ~0xFFFFFFFFLL) == 0);
-}
-
 BOOST_AUTO_TEST_CASE(util_time_GetTime)
 {
     SetMockTime(111);
@@ -589,18 +582,14 @@ BOOST_AUTO_TEST_CASE(util_time_GetTime)
         BOOST_CHECK_EQUAL(111000, TicksSinceEpoch<std::chrono::milliseconds>(NodeClock::now()));
         BOOST_CHECK_EQUAL(111000000, GetTime<std::chrono::microseconds>().count());
     }
+    SetMockTime(0s);
 
-    SetMockTime(0);
-    // Check that steady time and system time changes after a sleep
+    // Check that steady time changes after a sleep
     const auto steady_ms_0 = Now<SteadyMilliseconds>();
     const auto steady_0 = std::chrono::steady_clock::now();
-    const auto ms_0 = GetTime<std::chrono::milliseconds>();
-    const auto us_0 = GetTime<std::chrono::microseconds>();
     UninterruptibleSleep(1ms);
     BOOST_CHECK(steady_ms_0 < Now<SteadyMilliseconds>());
     BOOST_CHECK(steady_0 + 1ms <= std::chrono::steady_clock::now());
-    BOOST_CHECK(ms_0 < GetTime<std::chrono::milliseconds>());
-    BOOST_CHECK(us_0 < GetTime<std::chrono::microseconds>());
 }
 
 BOOST_AUTO_TEST_CASE(test_IsDigit)
@@ -1342,7 +1331,7 @@ BOOST_AUTO_TEST_CASE(test_Capitalize)
     BOOST_CHECK_EQUAL(Capitalize("\x00\xfe\xff"), "\x00\xfe\xff");
 }
 
-static std::string SpanToStr(const Span<const char>& span)
+static std::string SpanToStr(const std::span<const char>& span)
 {
     return std::string(span.begin(), span.end());
 }
@@ -1351,7 +1340,7 @@ BOOST_AUTO_TEST_CASE(test_script_parsing)
 {
     using namespace script;
     std::string input;
-    Span<const char> sp;
+    std::span<const char> sp;
     bool success;
 
     // Const(...): parse a constant, update span to skip it if successful
@@ -1401,7 +1390,7 @@ BOOST_AUTO_TEST_CASE(test_script_parsing)
     BOOST_CHECK(!success);
 
     // Expr(...): return expression that span begins with, update span to skip it
-    Span<const char> result;
+    std::span<const char> result;
 
     input = "(n*(n-1))/2";
     sp = input;
@@ -1434,7 +1423,7 @@ BOOST_AUTO_TEST_CASE(test_script_parsing)
     BOOST_CHECK_EQUAL(SpanToStr(sp), ",xxx");
 
     // Split(...): split a string on every instance of sep, return vector
-    std::vector<Span<const char>> results;
+    std::vector<std::span<const char>> results;
 
     input = "xxx";
     results = Split(input, 'x');
@@ -1875,6 +1864,102 @@ BOOST_AUTO_TEST_CASE(clearshrink_test)
         BOOST_CHECK_EQUAL(v.size(), 0);
         // std::deque has no capacity() we can observe.
     }
+}
+
+template <typename T>
+void TestCheckedLeftShift()
+{
+    constexpr auto MAX{std::numeric_limits<T>::max()};
+
+    // Basic operations
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(0, 1), 0);
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(0, 127), 0);
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(1, 1), 2);
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(2, 2), 8);
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(MAX >> 1, 1), MAX - 1);
+
+    // Max left shift
+    BOOST_CHECK_EQUAL(CheckedLeftShift<T>(1, std::numeric_limits<T>::digits - 1), MAX / 2 + 1);
+
+    // Overflow cases
+    BOOST_CHECK(!CheckedLeftShift<T>((MAX >> 1) + 1, 1));
+    BOOST_CHECK(!CheckedLeftShift<T>(MAX, 1));
+    BOOST_CHECK(!CheckedLeftShift<T>(1, std::numeric_limits<T>::digits));
+    BOOST_CHECK(!CheckedLeftShift<T>(1, std::numeric_limits<T>::digits + 1));
+
+    if constexpr (std::is_signed_v<T>) {
+        constexpr auto MIN{std::numeric_limits<T>::min()};
+        // Negative input
+        BOOST_CHECK_EQUAL(CheckedLeftShift<T>(-1, 1), -2);
+        BOOST_CHECK_EQUAL(CheckedLeftShift<T>((MIN >> 2), 1), MIN / 2);
+        BOOST_CHECK_EQUAL(CheckedLeftShift<T>((MIN >> 1) + 1, 1), MIN + 2);
+        BOOST_CHECK_EQUAL(CheckedLeftShift<T>(MIN >> 1, 1), MIN);
+        // Overflow negative
+        BOOST_CHECK(!CheckedLeftShift<T>((MIN >> 1) - 1, 1));
+        BOOST_CHECK(!CheckedLeftShift<T>(MIN >> 1, 2));
+        BOOST_CHECK(!CheckedLeftShift<T>(-1, 100));
+    }
+}
+
+template <typename T>
+void TestSaturatingLeftShift()
+{
+    constexpr auto MAX{std::numeric_limits<T>::max()};
+
+    // Basic operations
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(0, 1), 0);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(0, 127), 0);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(1, 1), 2);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(2, 2), 8);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(MAX >> 1, 1), MAX - 1);
+
+    // Max left shift
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(1, std::numeric_limits<T>::digits - 1), MAX / 2 + 1);
+
+    // Saturation cases
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>((MAX >> 1) + 1, 1), MAX);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(MAX, 1), MAX);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(1, std::numeric_limits<T>::digits), MAX);
+    BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(1, std::numeric_limits<T>::digits + 1), MAX);
+
+    if constexpr (std::is_signed_v<T>) {
+        constexpr auto MIN{std::numeric_limits<T>::min()};
+        // Negative input
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(-1, 1), -2);
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>((MIN >> 2), 1), MIN / 2);
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>((MIN >> 1) + 1, 1), MIN + 2);
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(MIN >> 1, 1), MIN);
+        // Saturation negative
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>((MIN >> 1) - 1, 1), MIN);
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(MIN >> 1, 2), MIN);
+        BOOST_CHECK_EQUAL(SaturatingLeftShift<T>(-1, 100), MIN);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(checked_left_shift_test)
+{
+    TestCheckedLeftShift<uint8_t>();
+    TestCheckedLeftShift<int8_t>();
+    TestCheckedLeftShift<size_t>();
+    TestCheckedLeftShift<uint64_t>();
+    TestCheckedLeftShift<int64_t>();
+}
+
+BOOST_AUTO_TEST_CASE(saturating_left_shift_test)
+{
+    TestSaturatingLeftShift<uint8_t>();
+    TestSaturatingLeftShift<int8_t>();
+    TestSaturatingLeftShift<size_t>();
+    TestSaturatingLeftShift<uint64_t>();
+    TestSaturatingLeftShift<int64_t>();
+}
+
+BOOST_AUTO_TEST_CASE(mib_string_literal_test)
+{
+    BOOST_CHECK_EQUAL(0_MiB, 0);
+    BOOST_CHECK_EQUAL(1_MiB, 1024 * 1024);
+    const auto max_mib{std::numeric_limits<size_t>::max() >> 20};
+    BOOST_CHECK_EXCEPTION(operator""_MiB(static_cast<unsigned long long>(max_mib) + 1), std::overflow_error, HasReason("MiB value too large for size_t byte conversion"));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

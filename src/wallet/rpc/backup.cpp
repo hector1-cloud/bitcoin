@@ -534,7 +534,7 @@ RPCHelpMan importwallet()
 
         // Use uiInterface.ShowProgress instead of pwallet.ShowProgress because pwallet.ShowProgress has a cancel button tied to AbortRescan which
         // we don't want for this progress bar showing the import progress. uiInterface.ShowProgress does not have a cancel button.
-        pwallet->chain().showProgress(strprintf("%s %s", pwallet->GetDisplayName(), _("Importing…").translated), 0, false); // show progress dialog in GUI
+        pwallet->chain().showProgress(strprintf("%s %s", pwallet->GetDisplayName(), _("Importing…")), 0, false); // show progress dialog in GUI
         std::vector<std::tuple<CKey, int64_t, bool, std::string>> keys;
         std::vector<std::pair<CScript, int64_t>> scripts;
         while (file.good()) {
@@ -559,7 +559,7 @@ RPCHelpMan importwallet()
                         fLabel = false;
                     if (vstr[nStr] == "reserve=1")
                         fLabel = false;
-                    if (vstr[nStr].substr(0,6) == "label=") {
+                    if (vstr[nStr].starts_with("label=")) {
                         strLabel = DecodeDumpString(vstr[nStr].substr(6));
                         fLabel = true;
                     }
@@ -1091,6 +1091,9 @@ static UniValue ProcessImportDescriptor(ImportData& import_data, std::map<CKeyID
         std::tie(range_start, range_end) = ParseDescriptorRange(data["range"]);
     }
 
+    // Only single key descriptors are allowed to be imported to a legacy wallet's keypool
+    bool can_keypool = parsed_descs.at(0)->IsSingleKey();
+
     const UniValue& priv_keys = data.exists("keys") ? data["keys"].get_array() : UniValue();
 
     for (size_t j = 0; j < parsed_descs.size(); ++j) {
@@ -1107,8 +1110,10 @@ static UniValue ProcessImportDescriptor(ImportData& import_data, std::map<CKeyID
             std::vector<CScript> scripts_temp;
             parsed_desc->Expand(i, keys, scripts_temp, out_keys);
             std::copy(scripts_temp.begin(), scripts_temp.end(), std::inserter(script_pub_keys, script_pub_keys.end()));
-            for (const auto& key_pair : out_keys.pubkeys) {
-                ordered_pubkeys.emplace_back(key_pair.first, desc_internal);
+            if (can_keypool) {
+                for (const auto& key_pair : out_keys.pubkeys) {
+                    ordered_pubkeys.emplace_back(key_pair.first, desc_internal);
+                }
             }
 
             for (const auto& x : out_keys.scripts) {
@@ -1575,16 +1580,15 @@ static UniValue ProcessDescriptorImport(CWallet& wallet, const UniValue& data, c
 
             WalletDescriptor w_desc(std::move(parsed_desc), timestamp, range_start, range_end, next_index);
 
-            // Check if the wallet already contains the descriptor
-            auto existing_spk_manager = wallet.GetDescriptorScriptPubKeyMan(w_desc);
-            if (existing_spk_manager) {
-                if (!existing_spk_manager->CanUpdateToWalletDescriptor(w_desc, error)) {
-                    throw JSONRPCError(RPC_INVALID_PARAMETER, error);
-                }
+            // Add descriptor to the wallet
+            auto spk_manager_res = wallet.AddWalletDescriptor(w_desc, keys, label, desc_internal);
+
+            if (!spk_manager_res) {
+                throw JSONRPCError(RPC_INVALID_PARAMETER, util::ErrorString(spk_manager_res).original);
             }
 
-            // Add descriptor to the wallet
-            auto spk_manager = wallet.AddWalletDescriptor(w_desc, keys, label, desc_internal);
+            auto spk_manager = spk_manager_res.value();
+
             if (spk_manager == nullptr) {
                 throw JSONRPCError(RPC_WALLET_ERROR, strprintf("Could not add descriptor '%s'", descriptor));
             }
@@ -1745,20 +1749,27 @@ RPCHelpMan importdescriptors()
                 if (scanned_time <= GetImportTimestamp(request, now) || results.at(i).exists("error")) {
                     response.push_back(results.at(i));
                 } else {
+                    std::string error_msg{strprintf("Rescan failed for descriptor with timestamp %d. There "
+                            "was an error reading a block from time %d, which is after or within %d seconds "
+                            "of key creation, and could contain transactions pertaining to the desc. As a "
+                            "result, transactions and coins using this desc may not appear in the wallet.",
+                            GetImportTimestamp(request, now), scanned_time - TIMESTAMP_WINDOW - 1, TIMESTAMP_WINDOW)};
+                    if (pwallet->chain().havePruned()) {
+                        error_msg += strprintf(" This error could be caused by pruning or data corruption "
+                                "(see bitcoind log for details) and could be dealt with by downloading and "
+                                "rescanning the relevant blocks (see -reindex option and rescanblockchain RPC).");
+                    } else if (pwallet->chain().hasAssumedValidChain()) {
+                        error_msg += strprintf(" This error is likely caused by an in-progress assumeutxo "
+                                "background sync. Check logs or getchainstates RPC for assumeutxo background "
+                                "sync progress and try again later.");
+                    } else {
+                        error_msg += strprintf(" This error could potentially caused by data corruption. If "
+                                "the issue persists you may want to reindex (see -reindex option).");
+                    }
+
                     UniValue result = UniValue(UniValue::VOBJ);
                     result.pushKV("success", UniValue(false));
-                    result.pushKV(
-                        "error",
-                        JSONRPCError(
-                            RPC_MISC_ERROR,
-                            strprintf("Rescan failed for descriptor with timestamp %d. There was an error reading a "
-                                      "block from time %d, which is after or within %d seconds of key creation, and "
-                                      "could contain transactions pertaining to the desc. As a result, transactions "
-                                      "and coins using this desc may not appear in the wallet. This error could be "
-                                      "caused by pruning or data corruption (see bitcoind log for details) and could "
-                                      "be dealt with by downloading and rescanning the relevant blocks (see -reindex "
-                                      "option and rescanblockchain RPC).",
-                                GetImportTimestamp(request, now), scanned_time - TIMESTAMP_WINDOW - 1, TIMESTAMP_WINDOW)));
+                    result.pushKV("error", JSONRPCError(RPC_MISC_ERROR, error_msg));
                     response.push_back(std::move(result));
                 }
             }

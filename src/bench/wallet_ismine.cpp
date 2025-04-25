@@ -54,8 +54,8 @@ static void WalletIsMine(benchmark::Bench& bench, bool legacy_wallet, int num_co
             std::string error;
             std::vector<std::unique_ptr<Descriptor>> desc = Parse("combo(" + EncodeSecret(key) + ")", keys, error, /*require_checksum=*/false);
             WalletDescriptor w_desc(std::move(desc.at(0)), /*creation_time=*/0, /*range_start=*/0, /*range_end=*/0, /*next_index=*/0);
-            auto spkm = wallet->AddWalletDescriptor(w_desc, keys, /*label=*/"", /*internal=*/false);
-            assert(spkm);
+            auto spk_manager = *Assert(wallet->AddWalletDescriptor(w_desc, keys, /*label=*/"", /*internal=*/false));
+            assert(spk_manager);
         }
     }
 
@@ -75,10 +75,8 @@ static void WalletIsMineLegacy(benchmark::Bench& bench) { WalletIsMine(bench, /*
 BENCHMARK(WalletIsMineLegacy, benchmark::PriorityLevel::LOW);
 #endif
 
-#ifdef USE_SQLITE
 static void WalletIsMineDescriptors(benchmark::Bench& bench) { WalletIsMine(bench, /*legacy_wallet=*/false); }
 static void WalletIsMineMigratedDescriptors(benchmark::Bench& bench) { WalletIsMine(bench, /*legacy_wallet=*/false, /*num_combo=*/2000); }
 BENCHMARK(WalletIsMineDescriptors, benchmark::PriorityLevel::LOW);
 BENCHMARK(WalletIsMineMigratedDescriptors, benchmark::PriorityLevel::LOW);
-#endif
 } // namespace wallet

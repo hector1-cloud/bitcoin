@@ -19,6 +19,7 @@
 #include <test/fuzz/util/descriptor.h>
 #include <test/util/setup_common.h>
 #include <util/check.h>
+#include <util/time.h>
 #include <util/translation.h>
 #include <validation.h>
 #include <wallet/scriptpubkeyman.h>
@@ -79,14 +80,19 @@ static std::optional<std::pair<WalletDescriptor, FlatSigningProvider>> CreateWal
 static DescriptorScriptPubKeyMan* CreateDescriptor(WalletDescriptor& wallet_desc, FlatSigningProvider& keys, CWallet& keystore)
 {
     LOCK(keystore.cs_wallet);
-    keystore.AddWalletDescriptor(wallet_desc, keys, /*label=*/"", /*internal=*/false);
-    return keystore.GetDescriptorScriptPubKeyMan(wallet_desc);
+    DescriptorScriptPubKeyMan* descriptor_spk_manager = nullptr;
+    auto spk_manager = *Assert(keystore.AddWalletDescriptor(wallet_desc, keys, /*label=*/"", /*internal=*/false));
+    if (spk_manager) {
+        descriptor_spk_manager = dynamic_cast<DescriptorScriptPubKeyMan*>(spk_manager);
+    }
+    return descriptor_spk_manager;
 };
 
 FUZZ_TARGET(scriptpubkeyman, .init = initialize_spkm)
 {
     SeedRandomStateForTest(SeedRand::ZEROS);
     FuzzedDataProvider fuzzed_data_provider{buffer.data(), buffer.size()};
+    SetMockTime(ConsumeTime(fuzzed_data_provider));
     const auto& node{g_setup->m_node};
     Chainstate& chainstate{node.chainman->ActiveChainstate()};
     std::unique_ptr<CWallet> wallet_ptr{std::make_unique<CWallet>(node.chain.get(), "", CreateMockableWalletDatabase())};

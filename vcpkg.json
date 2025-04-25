@@ -1,16 +1,17 @@
 {
-  "$comment": "The builtin-baseline corresponds to 2024.09.30 Release",
+  "$comment": "The builtin-baseline corresponds to 2025.03.19 Release",
   "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
-  "builtin-baseline": "c82f74667287d3dc386bce81e44964370c91a289",
+  "builtin-baseline": "b02e341c927f16d991edbd915d8ea43eac52096c",
   "dependencies": [
     "boost-multi-index",
     "boost-signals2",
     "libevent"
   ],
   "default-features": [
-    "qt5",
+    "qt",
     "tests",
     "wallet",
+    "berkeleydb",
     "zeromq"
   ],
   "features": {
@@ -20,18 +21,22 @@
         "berkeleydb"
       ]
     },
-    "qt5": {
-      "description": "Build GUI, Qt 5",
+    "qt": {
+      "description": "Build GUI, Qt 6",
       "dependencies": [
-        "qt5-base",
-        "qt5-tools",
+        {
+          "name": "qtbase",
+          "default-features": false,
+          "features": [
+            "gui",
+            "network",
+            "png",
+            "testlib",
+            "widgets"
+          ]
+        },
+        "qttools",
         "libqrencode"
-      ]
-    },
-    "sqlite": {
-      "description": "Enable SQLite wallet support",
-      "dependencies": [
-        "sqlite3"
       ]
     },
     "tests": {
@@ -41,9 +46,8 @@
       ]
     },
     "wallet": {
-      "description": "Enable wallet",
+      "description": "Enable wallet (SQLite)",
       "dependencies": [
-        "berkeleydb",
         "sqlite3"
       ]
     },

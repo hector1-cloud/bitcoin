@@ -42,7 +42,7 @@ from ports. However, you can build DB 4.8 yourself [using depends](/depends).
 
 ```bash
 pkg install gmake
-gmake -C depends NO_BOOST=1 NO_LIBEVENT=1 NO_QT=1 NO_SQLITE=1 NO_ZMQ=1 NO_USDT=1
+gmake -C depends NO_BOOST=1 NO_LIBEVENT=1 NO_QT=1 NO_ZMQ=1 NO_USDT=1
 ```
 
 When the build is complete, the Berkeley DB installation location will be displayed:
@@ -62,13 +62,13 @@ sh/bash: export BDB_PREFIX=[path displayed above]
 ```
 
 #### GUI Dependencies
-###### Qt5
+###### Qt6
 
 Bitcoin Core includes a GUI built with the cross-platform Qt Framework. To compile the GUI, we need to install
 the necessary parts of Qt, the libqrencode and pass `-DBUILD_GUI=ON`. Skip if you don't intend to use the GUI.
 
 ```bash
-pkg install qt5-buildtools qt5-core qt5-gui qt5-linguisttools qt5-testlib qt5-widgets
+pkg install qt6-buildtools qt6-core qt6-gui qt6-linguisttools qt6-testlib qt6-widgets
 ```
 
 ###### libqrencode
@@ -96,7 +96,7 @@ There is an included test suite that is useful for testing code changes when dev
 To run the test suite (recommended), you will need to have Python 3 installed:
 
 ```bash
-pkg install python3 databases/py-sqlite3
+pkg install python3 databases/py-sqlite3 net/py-pyzmq
 ```
 ---
 

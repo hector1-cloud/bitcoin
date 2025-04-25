@@ -76,6 +76,10 @@ def assert_equal(thing1, thing2, *args):
     if thing1 != thing2 or any(thing1 != arg for arg in args):
         raise AssertionError("not(%s)" % " == ".join(str(arg) for arg in (thing1, thing2) + args))
 
+def assert_not_equal(thing1, thing2, *, error_message=""):
+    if thing1 == thing2:
+        raise AssertionError(f"Both values are {thing1}{f', {error_message}' if error_message else ''}")
+
 
 def assert_greater_than(thing1, thing2):
     if thing1 <= thing2:
@@ -317,6 +321,13 @@ def wait_until_helper_internal(predicate, *, timeout=60, lock=None, timeout_fact
     raise AssertionError("Predicate {} not true after {} seconds".format(predicate_source, timeout))
 
 
+def bpf_cflags():
+    return [
+        "-Wno-error=implicit-function-declaration",
+        "-Wno-duplicate-decl-specifier",  # https://github.com/bitcoin/bitcoin/issues/32322
+    ]
+
+
 def sha256sum_file(filename):
     h = hashlib.sha256()
     with open(filename, 'rb') as f:
@@ -453,6 +464,17 @@ def write_config(config_path, *, n, chain, extra_config="", disable_autoconnect=
         f.write("unsafesqlitesync=1\n")
         if disable_autoconnect:
             f.write("connect=0\n")
+        # Limit max connections to mitigate test failures on some systems caused by the warning:
+        # "Warning: Reducing -maxconnections from <...> to <...> due to system limitations".
+        # The value is calculated as follows:
+        #  available_fds = 256          // Same as FD_SETSIZE on NetBSD.
+        #  MIN_CORE_FDS = 151           // Number of file descriptors required for core functionality.
+        #  MAX_ADDNODE_CONNECTIONS = 8  // Maximum number of -addnode outgoing nodes.
+        #  nBind == 3                   // Maximum number of bound interfaces used in a test.
+        #
+        #  min_required_fds = MIN_CORE_FDS + MAX_ADDNODE_CONNECTIONS + nBind = 151 + 8 + 3 = 162;
+        #  nMaxConnections = available_fds - min_required_fds = 256 - 161 = 94;
+        f.write("maxconnections=94\n")
         f.write(extra_config)
 
 
@@ -581,3 +603,10 @@ def find_vout_for_address(node, txid, addr):
         if addr == tx["vout"][i]["scriptPubKey"]["address"]:
             return i
     raise RuntimeError("Vout not found for address: txid=%s, addr=%s" % (txid, addr))
+
+
+def sync_txindex(test_framework, node):
+    test_framework.log.debug("Waiting for node txindex to sync")
+    sync_start = int(time.time())
+    test_framework.wait_until(lambda: node.getindexinfo("txindex")["txindex"]["synced"])
+    test_framework.log.debug(f"Synced in {time.time() - sync_start} seconds")
